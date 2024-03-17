@@ -1,47 +1,48 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const { Expo } = require('expo-server-sdk');
+const mysql = require('mysql');
+require('dotenv').config();
 
-// Create a new Expo SDK client
-let expo = new Expo();
 const app = express();
+const port = 3000;
+
 app.use(bodyParser.json());
 
-app.post('/send-notification', async (req, res) => {
-  const { to, sound, title, body, data } = req.body;
-  let messages = [];
-
-  // Basic validation to check if token looks like a valid Expo push token
-  if (!Expo.isExpoPushToken(to)) {
-    console.error(`Push token ${to} is not a valid Expo push token`);
-    res.status(400).send({ error: `Push token ${to} is not a valid Expo push token` });
-    return;
-  }
-
-  messages.push({
-    to,
-    sound,
-    title,
-    body,
-    data,
-  });
-
-  let chunks = expo.chunkPushNotifications(messages);
-  let tickets = [];
-  for (let chunk of chunks) {
-    try {
-      let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-      console.log(ticketChunk);
-      tickets.push(...ticketChunk);
-    } catch (error) {
-      console.error(error);
-    }
-  }
-
-  res.send({ status: 'success', message: 'Notification sent successfully!', tickets });
+const db = mysql.createConnection({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_DATABASE
 });
 
-const port = 3000;
+db.connect((err) => {
+  if (err) {
+    console.error('An error occurred while connecting to the DB:', err);
+    return;
+  }
+  console.log('Connected to database successfully.');
+});
+
+app.post('/register-device', (req, res) => {
+  const { deviceToken } = req.body;
+  // Add any other vendor info from req.body as needed for your application logic
+
+  const query = `
+    INSERT INTO vendors (deviceToken)
+    VALUES (?)
+    ON DUPLICATE KEY UPDATE deviceToken = VALUES(deviceToken);
+  `;
+
+  db.query(query, [deviceToken], (error, results) => {
+    if (error) {
+      console.error('Failed to insert or update device token:', error);
+      res.status(500).send('Error registering device token');
+      return;
+    }
+    res.send({ message: 'Device token registered successfully', deviceToken });
+  });
+});
+
 app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+  console.log(`Server running at http://localhost:${port}`);
 });
