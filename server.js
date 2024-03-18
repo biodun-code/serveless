@@ -38,32 +38,46 @@ app.post('/register-token', (req, res) => {
 
 // Endpoint to send a push notification
 app.post('/send-notification', (req, res) => {
-  const { token, message } = req.body;
-  if (!token || !message) {
-    return res.status(400).send('Token and message are required');
+  const { recipientId, message } = req.body;
+  if (!recipientId || !message) {
+    return res.status(400).send('Recipient ID and message are required');
   }
 
-  const notificationMessage = {
-    to: token,
-    sound: 'default',
-    title: 'New Notification',
-    body: message,
-  };
+  // Query the database to get the recipient's expoPushToken
+  const query = 'SELECT expoPushToken FROM users WHERE id = ?';
+  db.query(query, [recipientId], (error, results) => {
+    if (error) {
+      console.error('Failed to fetch recipient token:', error);
+      return res.status(500).send('Error fetching recipient token');
+    }
+    if (results.length === 0) {
+      return res.status(404).send('Recipient not found');
+    }
 
-  // Using axios to send the push notification
-  axios.post('https://exp.host/--/api/v2/push/send', notificationMessage, {
-    headers: {
-      'Accept': 'application/json',
-      'Accept-encoding': 'gzip, deflate',
-      'Content-Type': 'application/json',
-    },
-  })
-  .then(() => res.send('Notification sent successfully'))
-  .catch((error) => {
-    console.error('Error sending notification:', error);
-    res.status(500).send('Error sending notification');
+    const recipientToken = results[0].expoPushToken;
+    const notificationMessage = {
+      to: recipientToken,
+      sound: 'default',
+      title: 'New Message',
+      body: message,
+    };
+
+    // Using axios to send the push notification
+    axios.post('https://exp.host/--/api/v2/push/send', notificationMessage, {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+    })
+    .then(() => res.send('Notification sent successfully'))
+    .catch((error) => {
+      console.error('Error sending notification:', error);
+      res.status(500).send('Error sending notification');
+    });
   });
 });
+
 
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
