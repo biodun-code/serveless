@@ -1,91 +1,67 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const mysql = require('mysql');
-const { Expo } = require('expo-server-sdk');
+const mysql = require('mysql2');
+const axios = require('axios'); // Import axios
+const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-const port = 3000;
+const port = 3000; // You can choose any port
 
-// Create a new Expo SDK client
-let expo = new Expo();
-
-app.use(bodyParser.json());
-
-// Database connection
-const db = mysql.createConnection({
+// Replace these with your actual MySQL database connection details
+const db = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE
 });
 
-// Connect to the database
-db.connect(err => {
-  if (err) {
-    console.error('An error occurred while connecting to the DB:', err);
-    return;
+app.use(cors()); // Use CORS to allow requests from your frontend
+app.use(bodyParser.json());
+
+// Endpoint to register a device's push token
+app.post('/register-token', (req, res) => {
+  const { token } = req.body;
+  if (!token) {
+    return res.status(400).send('Token is required');
   }
-  console.log('Connected to database successfully.');
-});
 
-// Endpoint to register device tokens
-app.post('/register-device', (req, res) => {
-  const { deviceToken } = req.body;
-
-  const query = `
-    INSERT INTO vendors (deviceToken)
-    VALUES (?)
-    ON DUPLICATE KEY UPDATE deviceToken = VALUES(deviceToken);
-  `;
-
-  db.query(query, [deviceToken], (error) => {
+  const query = 'INSERT INTO users (expoPushToken) VALUES (?) ON DUPLICATE KEY UPDATE expoPushToken = VALUES(expoPushToken);';
+  db.query(query, [token], (error) => {
     if (error) {
-      console.error('Failed to insert or update device token:', error);
-      res.status(500).send('Error registering device token');
-      return;
+      console.error('Failed to register token:', error);
+      return res.status(500).send('Error registering token');
     }
-    res.send({ message: 'Device token registered successfully', deviceToken });
+    res.send('Token registered successfully');
   });
 });
 
-// Endpoint to send notifications
+// Endpoint to send a push notification
 app.post('/send-notification', (req, res) => {
-  const { message } = req.body;
+  const { token, message } = req.body;
+  if (!token || !message) {
+    return res.status(400).send('Token and message are required');
+  }
 
-  const query = `SELECT deviceToken FROM vendors;`;
+  const notificationMessage = {
+    to: token,
+    sound: 'default',
+    title: 'New Notification',
+    body: message,
+  };
 
-  db.query(query, async (error, results) => {
-    if (error) {
-      console.error('Failed to retrieve device tokens:', error);
-      return res.status(500).send('Error retrieving device tokens');
-    }
-
-    let notifications = [];
-    for (let row of results) {
-      if (!Expo.isExpoPushToken(row.deviceToken)) {
-        console.error(`Push token ${row.deviceToken} is not a valid Expo push token`);
-        continue;
-      }
-
-      notifications.push({
-        to: row.deviceToken,
-        sound: 'default',
-        body: message,
-        data: { message },
-      });
-    }
-
-    let chunks = expo.chunkPushNotifications(notifications);
-    for (let chunk of chunks) {
-      try {
-        await expo.sendPushNotificationsAsync(chunk);
-      } catch (error) {
-        console.error(error);
-      }
-    }
-
-    res.send({ message: 'Notification sent successfully.' });
+  // Using axios to send the push notification
+  axios.post('https://exp.host/--/api/v2/push/send', notificationMessage, {
+    headers: {
+      'Accept': 'application/json',
+      'Accept-encoding': 'gzip, deflate',
+      'Content-Type': 'application/json',
+    },
+  })
+  .then(() => res.send('Notification sent successfully'))
+  .catch((error) => {
+    console.error('Error sending notification:', error);
+    res.status(500).send('Error sending notification');
   });
 });
 
